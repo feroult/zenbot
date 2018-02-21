@@ -106,6 +106,11 @@ c.therock = {}
 c.therock.key = 'YOUR-API-KEY'
 c.therock.secret = 'YOUR-SECRET'
 
+// to enable mercadobitcoin trading, enter your API credentials:
+c.mercado = {}
+c.mercado.key = 'YOUR-API-KEY'
+c.mercado.secret = 'YOUR-SECRET'
+
 // Optional stop-order triggers:
 
 // sell if price drops below this % of bought price (0 to disable)
