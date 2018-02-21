@@ -1,8 +1,6 @@
 const ccxt = require('ccxt')
 const path = require('path')
 
-var _t = {}
-
 module.exports = function container (conf) {
 
   //let recoverableErrors = new RegExp(/(ESOCKETTIMEOUT|ESOCKETTIMEDOUT|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|Invalid nonce|Rate limit exceeded|URL request error)/)
@@ -126,14 +124,6 @@ module.exports = function container (conf) {
         client.fetchTrades(joinProduct(opts.product_id), undefined, undefined, params)
           .then(result => {
             var trades = result.map(function (trade) {
-
-              if(_t[trade.id]) {
-                _t[trade.id].push(trade.id)
-                // console.log('duplicate', _t[trade.id])
-              } else {
-                _t[trade.id] = [trade.id]
-              }
-
               return {
                 trade_id: Number(trade.id),
                 time: trade.timestamp,
