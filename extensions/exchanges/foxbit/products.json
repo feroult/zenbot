@@ -1,0 +1,42 @@
+[
+  {
+    "asset": "BTC",
+    "currency": "VEF",
+    "min_size": "0.002",
+    "max_size": "30",
+    "increment": "0.001000000000000000",
+    "label": "BTC/VEF"
+  },
+  {
+    "asset": "BTC",
+    "currency": "VND",
+    "min_size": "0.002",
+    "max_size": "30",
+    "increment": "0.001000000000000000",
+    "label": "BTC/VND"
+  },
+  {
+    "asset": "BTC",
+    "currency": "BRL",
+    "min_size": "0.002",
+    "max_size": "30",
+    "increment": "0.001000000000000000",
+    "label": "BTC/BRL"
+  },
+  {
+    "asset": "BTC",
+    "currency": "PKR",
+    "min_size": "0.002",
+    "max_size": "30",
+    "increment": "0.001000000000000000",
+    "label": "BTC/PKR"
+  },
+  {
+    "asset": "BTC",
+    "currency": "CLP",
+    "min_size": "0.002",
+    "max_size": "30",
+    "increment": "0.001000000000000000",
+    "label": "BTC/CLP"
+  }
+]
