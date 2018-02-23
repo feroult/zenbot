@@ -95,17 +95,20 @@ module.exports = function container (conf) {
   var exchange = {
     name: 'foxbit',
     historyScan: 'forward',
-    makerFee:  -0.01,
-    takerFee: 0.1,
+    makerFee:  0.005,
+    takerFee: 0.0025,
 
     getProducts: function () {
       if (firstRun)
       {
         firstRun = false
         var client = publicClient()
-        this.makerFee = client.fees.trading.maker * 100
-        this.takerFee = client.fees.trading.taker * 100
-
+        if (client.fees.trading.maker) {
+          this.makerFee = client.fees.trading.maker * 100
+        }
+        if (client.fees.trading.taker ) {
+          this.takerFee = client.fees.trading.taker * 100
+        }
       }
       return require('./products.json')
     },
@@ -118,7 +121,7 @@ module.exports = function container (conf) {
         if(opts.from < 999999999999) {
           params.since = opts.from
         } else {
-          params.since = 1500000
+          params.since = 2545000
         }
 
         client.fetchTrades(joinProduct(opts.product_id), undefined, undefined, params)
