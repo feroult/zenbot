@@ -1,15 +1,25 @@
-const ccxt = require('ccxt')
-const path = require('path')
+var BlinkTradeAPI = require('blinktrade'),
+  path = require('path'),
+  minimist = require('minimist'),
+  // eslint-disable-next-line no-unused-vars
+  colors = require('colors'),
+  n = require('numbro')
 
-module.exports = function container (conf) {
+const PROD = false
 
-  //let recoverableErrors = new RegExp(/(ESOCKETTIMEOUT|ESOCKETTIMEDOUT|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|Invalid nonce|Rate limit exceeded|URL request error)/)
+module.exports = function foxbit (conf) {
+  var s = {
+    options: minimist(process.argv)
+  }
+  var so = s.options
 
   var public_client, authed_client
 
-
-  function publicClient () {
-    if (!public_client) public_client = new ccxt.foxbit({ 'apiKey': '', 'secret': '' })
+  function publicClient() {
+    if (!public_client) public_client = new BlinkTradeAPI.BlinkTradeRest({
+      prod: PROD,
+      currency: 'BRL'
+    })
     return public_client
   }
 
@@ -18,305 +28,274 @@ module.exports = function container (conf) {
       if (!conf.foxbit || !conf.foxbit.key || !conf.foxbit.key === 'YOUR-API-KEY') {
         throw new Error('please configure your foxbit credentials in ' + path.resolve(__dirname, 'conf.js'))
       }
-      authed_client = new ccxt.foxbit({ 'apiKey': conf.foxbit.key, 'secret': conf.foxbit.secret })
+
+      authed_client = new BlinkTradeAPI.BlinkTradeRest({
+        prod: PROD,
+        key: conf.foxbit.key,
+        secret: conf.foxbit.secret,
+        currency: 'BRL'
+      })
     }
     return authed_client
   }
 
   function joinProduct(product_id) {
-    return product_id.split('-')[0] + '/' + product_id.split('-')[1]
+    return (product_id.split('-')[0].toLowerCase() + product_id.split('-')[1]).toLowerCase()
   }
 
-  function retry (method, args, err) {
-    var timeout = 5000
-    if (method == 'getOrder') {
-      // it can take up to 30 seconds for foxbit to update with an order change.
-      if (err)
-        if (err.message.match(/not found/)) {
-          timeout = 7000
-        }
+  function retry(method, args, error) {
+    console.log('retry', method, args, error)
+    if (error.code === 429) {
+      console.error((`\nfoxbit API rate limit exceeded! unable to call ${method}, aborting`).red)
+      return
     }
 
-    if (err)
-      if (err.message)
-        if (err.message.match(/Rate limit exceeded/)) {
-          timeout = 10000
-        }
-    setTimeout(function () {
+    if (method !== 'getTrades') {
+      console.error((`\nfoxbit API is down: (${method}) ${error.message}`).red)
+      console.log(('Retrying in 30 sseconds ...').yellow)
+    }
+
+    debugOut(error)
+
+    setTimeout(function() {
       exchange[method].apply(exchange, args)
-    }, timeout)
-    return false
+    }, 30000)
 
   }
 
-  // function handleErrors(command, err, data, args, callback) {
+  function debugOut(msg) {
+    if (so.debug) console.log(msg)
+  }
 
-  //   if (err)
-  //   {
-  //     if (err.message && err.message.match(recoverableErrors)) {
+  var orders = {}
 
-  //       return retry(command, args, err)
-  //     }
-  //     return callback(err, [])     
-  //   }
-
-
-  //   if (typeof data !== 'object') {
-  //     console.log(`bittrex API ${command} had an abnormal response, quitting.`)
-  //     return callback(null, [])
-  //   }
-
-  //   // generic error handler data was null and err was null
-  //   if (data == null)
-  //   {
-  //     return retry(command, args, err)
-  //   }
-
-  //   // specific handlers
-  //   if ((command == 'getQuote' || command == 'getTrades') && data.result == null )
-  //   {
-
-  //     return retry(command, args, data)
-  //   }
-
-  //   if(!data.success) {
-  //     if (data.message && data.message.match(recoverableErrors)) {
-  //       return retry(command, args, data.message)
-  //     }
-  //     return callback(null, [])
-  //   }
-
-
-  //   return true
-  // }
-
-
-  var firstRun = true
   var exchange = {
     name: 'foxbit',
     historyScan: 'forward',
-    makerFee:  0.005,
-    takerFee: 0.0025,
+    makerFee: 0.25,
+    takerFee: 0.50,
 
-    getProducts: function () {
-      if (firstRun)
-      {
-        firstRun = false
-        var client = publicClient()
-        if (client.fees.trading.maker) {
-          this.makerFee = client.fees.trading.maker * 100
-        }
-        if (client.fees.trading.taker ) {
-          this.takerFee = client.fees.trading.taker * 100
-        }
-      }
+    getProducts: function() {
       return require('./products.json')
     },
 
-    getTrades: function (opts, cb) {
+    getTrades: function(opts, cb) {
       var func_args = [].slice.call(arguments)
-      var client = publicClient()
-      {
-        var params = {}
-        if(opts.from < 999999999999) {
-          params.since = opts.from
-        } else {
-          params.since = 2545000
-        }
-
-        client.fetchTrades(joinProduct(opts.product_id), undefined, undefined, params)
-          .then(result => {
-            var trades = result.map(function (trade) {
-              return {
-                trade_id: Number(trade.id),
-                time: trade.timestamp,
-                size: parseFloat(trade.amount),
-                price: parseFloat(trade.price),
-                selector: 'foxbit.'+opts.product_id,
-                side: trade.side
-              }
-            })
-
-            cb(null, trades)
-          })
-          .catch(function (error) {
-            return retry('getTrades', func_args,error)
-          })
+      var args = {
+        limit: 100,
+        // since: opts.from
       }
+
+      if(opts.from > 999999999) {
+        if(PROD) {
+          args.since = 2500000 // Mon Feb 05 2018 10:07:22 GMT-0200 (-02)
+        } else {
+          args.since = 18000 // Mon Jan 22 2018 15:15:05 GMT-0200 (test)
+        }
+      } else {
+        args.since = opts.from
+      }
+
+      console.log('args', args.since)
+
+      var client = publicClient()
+      client.trades(args)
+        .then(body => {
+          // console.log('body', body)
+          var trades = body.map(function(trade) {
+            return {
+              trade_id: trade.tid,
+              time: trade.date * 1000,
+              size: Number(trade.amount),
+              price: Number(trade.price),
+              side: trade.side
+            }
+          })
+
+          cb(null, trades)
+        })
+        .catch(error => retry('getTrades', func_args, error))
     },
 
-    getBalance: function (opts, cb) {
+    getBalance: function(opts, cb) {
       var func_args = [].slice.call(arguments)
+
       var client = authedClient()
-      client.fetchBalance()
-        .then(result => {
-          var balance = {asset: 0, currency: 0}
-          Object.keys(result).forEach(function (key) {
-            if (key === opts.currency) {
-              balance.currency = result[key].free
-              balance.currency_hold = result[key].used
-            }
-            if (key === opts.asset) {
-              balance.asset = result[key].free
-              balance.asset_hold = result[key].used
-            }
-          })
+      client.getMyAvailableBalances()
+        .then(body => {
+          var asset = body.find(x => x.currency.toLowerCase() === opts.asset.toLowerCase())
+          var currency = body.find(x => x.currency.toLowerCase() === opts.currency.toLowerCase())
+
+          var balance = {
+            asset: n(asset.amount).format('0.00000'),
+            asset_hold: n(asset.amount).subtract(asset.available).format('0.00000'),
+            currency: n(currency.amount).format('0.00'),
+            currency_hold: n(currency.amount).subtract(currency.available).format('0.00')
+          }
+
+          debugOut('Balance/Hold:')
+          debugOut(`  ${currency.currency} (${balance.currency}/${balance.currency_hold})`)
+          debugOut(`  ${asset.currency} (${balance.asset}/${balance.asset_hold})`)
+
           cb(null, balance)
         })
-        .catch(function (error) {
-          return retry('getBalance', func_args,error)
-        })
+        .catch(error => retry('getBalance', func_args, error))
     },
 
-    getQuote: function (opts, cb) {
+    getQuote: function(opts, cb) {
       var func_args = [].slice.call(arguments)
+
       var client = publicClient()
-      client.fetchTicker(joinProduct(opts.product_id))
-        .then(result => {
-          cb(null, { bid: result.bid, ask: result.ask })
-        })
-        .catch(function (error) {
-          return retry('getQuote', func_args,error)
-        })
-    },
-
-    cancelOrder: function (opts, cb) {
-      var func_args = [].slice.call(arguments)
-      var client = authedClient()
-      client.cancelOrder(opts.order_id,joinProduct(opts.product_id) )
-        .then( (result) => {
-          cb(result)
-        })
-        .catch(function (error) {
-          return retry('cancelOrder', func_args,error)
-        })
-    },
-
-    buy: function (opts, cb) {
-      var func_args = [].slice.call(arguments)
-      var client = authedClient()
-      if (typeof opts.post_only === 'undefined') {
-        opts.post_only = true
-      }
-
-      if (opts.order_type === 'taker') {
-        opts.type = 'market'
-      }
-      if (opts.order_type == 'maker') {
-        opts.type = 'limit'
-      }
-
-      opts.side = 'buy'
-
-      let callParams = {
-        symbol : joinProduct(opts.product_id),
-        type : opts.type,
-        side: 'buy',
-        quantity: opts.size,
-        price: opts.price
-      }
-
-      client.createOrder( callParams.symbol, callParams.type, callParams.side, callParams.quantity, callParams.price)
-        .then(result => {
-
-          cb(null, result)
-        }).catch(function (error) {
-          if (error.message.match(/Insufficient funds/))
-          {
-            let order = {
-              status: 'rejected',
-              reject_reason: 'balance'
-            }
-            return cb(null, order)
+      client.getTicker(joinProduct(opts.product_id))
+        .then(body => {
+          var r = {
+            bid: String(body.bid),
+            ask: String(body.ask)
           }
-          return retry('buy', func_args)
+
+          cb(null, r)
         })
+        .catch(error => retry('getQuote', func_args, error))
     },
 
-    sell: function (opts, cb) {
+    cancelOrder: function(opts, cb) {
       var func_args = [].slice.call(arguments)
-      var client = authedClient()
-      if (typeof opts.post_only === 'undefined') {
-        opts.post_only = true
-      }
-      if (opts.order_type === 'taker') {
-        opts.type = 'market'
-      }
-      if (opts.order_type == 'maker') {
-        opts.type = 'limit'
-      }
-      opts.side = 'sell'
-      let callParams = {
-        symbol : joinProduct(opts.product_id),
-        type : opts.type,
-        side: 'sell',
-        quantity: opts.size,
-        price: opts.price
+      var params = {
+        order_id: opts.order_id
       }
 
-      client.createOrder(callParams.symbol, callParams.type, callParams.side, callParams.quantity, callParams.price)
-        .then(result => {
-          let order = {
-            id: result ? result.id : null,
+      debugOut(`Cancelling order ${opts.order_id}`)
+
+      var client = authedClient()
+      client.cancelOrder(params)
+        .then(cb())
+        .catch(error => retry('cancelOrder', func_args, error))
+    },
+
+    buy: function(opts, cb) {
+      var params = {
+        symbol: joinProduct(opts.product_id),
+        amount: n(opts.size).format('0.00000'),
+        price: n(opts.price).format('0.00'),
+        side: 'buy',
+        type: 'exchange limit',
+        options: []
+      }
+
+      if (opts.order_type === 'taker') {
+        params.options.push('immediate-or-cancel')
+      } else if (opts.post_only) {
+        params.options.push('maker-or-cancel')
+      }
+
+      debugOut(`Requesting ${opts.order_type} buy for ${opts.size} assets`)
+
+      var client = authedClient()
+      client.newOrder(params)
+        .then(body => {
+          var order = {
+            id: body.order_id,
             status: 'open',
-            price: opts.price,
-            size: opts.size,
-            post_only: !!opts.post_only,
+            price: Number(opts.price),
+            size: Number(opts.size),
             created_at: new Date().getTime(),
             filled_size: '0',
-            ordertype: opts.order_type
+            ordertype: opts.order_type,
+            postonly: !!opts.post_only
           }
 
-
-          return cb(null, order)
-        }).catch(function (error) {
-          if (error.message.match(/Insufficient funds/))
-          {
-            let order = {
-              status: 'rejected',
-              reject_reason: 'balance'
-            }
-            return cb(null, order)
+          if (opts.post_only && body.is_cancelled) {
+            order.status = 'rejected',
+            order.reject_reason = 'post only'
           }
-          return retry('sell', func_args, error)
+
+          debugOut(`    Purchase ID: ${body.id}`)
+
+          orders['~' + body.order_id] = order
+          cb(null, order)
         })
+        .catch(error => cb(error))
     },
 
-    getOrder: function (opts, cb) {
-      var func_args = [].slice.call(arguments)
+    sell: function(opts, cb) {
+      var params = {
+        symbol: joinProduct(opts.product_id),
+        amount: n(opts.size).format('0.00000'),
+        price: n(opts.price).format('0.00'),
+        side: 'sell',
+        type: 'exchange limit',
+        options: []
+      }
+
+      if (opts.order_type === 'taker') {
+        params.options.push('immediate-or-cancel')
+      } else if (opts.post_only) {
+        params.options.push('maker-or-cancel')
+      }
+
+      debugOut(`Requesting ${opts.order_type} sell for ${opts.size} assets`)
+
       var client = authedClient()
-
-      client.fetchOrder(opts.order_id, joinProduct(opts.product_id),{wait:100000})
-        .then( result => {
-          let r = result
-          if (result.status === 'canceled') {
-          // order was cancelled. recall from cache
-
-            return cb({message:'Order not found',desc:'Order cancel or deleted'})
-          }
-          if (result.status == 'open')
-          {
-            result.status = 'open'
-            result.filled_size = parseFloat(result.amount) - parseFloat(result.remaining)
-
-            return cb(null, result)
+      client.newOrder(params)
+        .then(body => {
+          var order = {
+            id: body.order_id,
+            status: 'open',
+            price: Number(opts.price),
+            size: Number(opts.size),
+            created_at: new Date().getTime(),
+            filled_size: '0',
+            ordertype: opts.order_type,
+            postonly: !!opts.post_only
           }
 
-          if (result.status == 'done' || result.status == 'closed') {
-            result.status = 'done'
-            result.done_at = new Date().getTime()
-            result.filled_size = parseFloat(result.amount) - parseFloat(result.remaining)
-            return cb(null, result)
+          if (opts.post_only && body.is_cancelled) {
+            order.status = 'rejected',
+            order.reject_reason = 'post only'
           }
 
-          return cb(null,r)
-        }).catch(function (error) {
-          return retry('getOrder', func_args,error)
+          debugOut(`    Purchase ID: ${body.id}`)
+
+          orders['~' + body.order_id] = order
+          cb(null, order)
         })
+        .catch(error => cb(error))
     },
 
-    getCursor: function (trade) {
-      // console.log('ha', trade)
+    getOrder: function(opts, cb) {
+      var order = orders['~' + opts.order_id]
+      var params = {
+        order_id: opts.order_id
+      }
+
+      var client = authedClient()
+      client.getMyOrderStatus(params)
+        .then(body => {
+          if (typeof body !== 'undefined') {
+            if (body.is_cancelled) {
+              order.status = 'done'
+              order.done_at = new Date().getTime()
+              order.filled_size = '0.00000'
+            } else if (!body.is_live) {
+              order.status = 'done'
+              order.done_at = new Date().getTime()
+              order.filled_size = n(body.executed_amount).format('0.00000')
+              order.price = n(body.avg_execution_price).format('0.00')
+            } else {
+              order.filled_size = n(body.executed_amount).format('0.00000')
+              order.price = n(body.avg_execution_price).format('0.00')
+            }
+          }
+
+          debugOut(`Lookup order ${opts.order_id} status is ${order.status}`)
+
+          cb(null, order)
+        })
+        .catch(error => cb(error))
+    },
+
+    // return the property used for range querying.
+    getCursor: function(trade) {
       return (trade.trade_id || trade)
     }
   }
