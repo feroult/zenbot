@@ -1,5 +1,6 @@
 const ccxt = require('ccxt')
 const path = require('path')
+const n = require('numbro')
 
 module.exports = function container (conf) {
 
@@ -10,7 +11,7 @@ module.exports = function container (conf) {
 
   function publicClient () {
     if (!public_client) public_client = new ccxt.mercado({ 'apiKey': '', 'secret': '' })
-    return public_client
+    return wrapClient(public_client)
   }
 
   function authedClient() {
@@ -20,7 +21,33 @@ module.exports = function container (conf) {
       }
       authed_client = new ccxt.mercado({ 'apiKey': conf.mercado.key, 'secret': conf.mercado.secret })
     }
-    return authed_client
+    console.trace('authedClient finish')
+    return wrapClient(authed_client)
+  }
+
+  function wrapClient(client) {
+    addWaitBefore(client, 'fetchTrades')
+    addWaitBefore(client, 'fetchBalance')
+    addWaitBefore(client, 'fetchTicker')
+    addWaitBefore(client, 'cancelOrder')
+    addWaitBefore(client, 'createOrder')
+    addWaitBefore(client, 'fetchOrder')
+    return client
+  }
+
+  function addWaitBefore(client, fnName) {
+    const oldFn = client[fnName]
+    client[fnName] = function () {
+      const args = arguments
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          console.log('WAIT: ', fnName)
+          oldFn.apply(client, args)
+            .then(arg => resolve(arg))
+            .catch(err => reject(err))
+        }, 1500)
+      })
+    }
   }
 
   function joinProduct(product_id) {
@@ -28,6 +55,7 @@ module.exports = function container (conf) {
   }
 
   function retry (method, args, err) {
+    console.log('retry', method, err)
     var timeout = 5000
     if (method == 'getOrder') {
       // it can take up to 30 seconds for mercado to update with an order change.
@@ -128,7 +156,7 @@ module.exports = function container (conf) {
                 trade_id: Number(trade.id),
                 time: trade.timestamp,
                 size: parseFloat(trade.amount),
-                price: parseFloat(trade.price),
+                price: n(parseFloat(trade.price)).format('0.00000'),
                 selector: 'mercado.'+opts.product_id,
                 side: trade.side
               }
@@ -143,6 +171,7 @@ module.exports = function container (conf) {
     },
 
     getBalance: function (opts, cb) {
+      console.log('#getBalance')
       var func_args = [].slice.call(arguments)
       var client = authedClient()
       client.fetchBalance()
@@ -196,12 +225,12 @@ module.exports = function container (conf) {
         opts.post_only = true
       }
 
-      if (opts.order_type === 'taker') {
-        opts.type = 'market'
-      }
-      if (opts.order_type == 'maker') {
-        opts.type = 'limit'
-      }
+      // if (opts.order_type === 'taker') {
+      //   opts.type = 'market'
+      // }
+      // if (opts.order_type == 'maker') {
+      opts.type = 'limit'
+      // }
 
       opts.side = 'buy'
 
@@ -212,6 +241,8 @@ module.exports = function container (conf) {
         quantity: opts.size,
         price: opts.price
       }
+
+      console.log('price', opts.price)
 
       client.createOrder( callParams.symbol, callParams.type, callParams.side, callParams.quantity, callParams.price)
         .then(result => {
@@ -226,7 +257,7 @@ module.exports = function container (conf) {
             }
             return cb(null, order)
           }
-          return retry('buy', func_args)
+          return retry('buy', func_args, error)
         })
     },
 
