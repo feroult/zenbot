@@ -5,7 +5,8 @@ var BlinkTradeAPI = require('blinktrade'),
   colors = require('colors'),
   n = require('numbro')
 
-const PROD = false
+const PROD = true
+const FOXBIT_ID = '4'
 
 module.exports = function foxbit (conf) {
   var s = {
@@ -18,6 +19,8 @@ module.exports = function foxbit (conf) {
   function publicClient() {
     if (!public_client) public_client = new BlinkTradeAPI.BlinkTradeRest({
       prod: PROD,
+      key: conf.foxbit.key,
+      secret: conf.foxbit.secret,
       currency: 'BRL'
     })
     return public_client
@@ -30,7 +33,7 @@ module.exports = function foxbit (conf) {
       }
 
       authed_client = new BlinkTradeAPI.BlinkTradeRest({
-        prod: PROD,
+        prod: true,
         key: conf.foxbit.key,
         secret: conf.foxbit.secret,
         currency: 'BRL'
@@ -88,15 +91,14 @@ module.exports = function foxbit (conf) {
 
       if(opts.from > 999999999) {
         if(PROD) {
-          args.since = 2500000 // Mon Feb 05 2018 10:07:22 GMT-0200 (-02)
+          // args.since = 2500000 // Mon Feb 05 2018 10:07:22 GMT-0200 (-02)
+          args.since=2620000
         } else {
           args.since = 18000 // Mon Jan 22 2018 15:15:05 GMT-0200 (test)
         }
       } else {
         args.since = opts.from
       }
-
-      console.log('args', args.since)
 
       var client = publicClient()
       client.trades(args)
@@ -121,22 +123,18 @@ module.exports = function foxbit (conf) {
       var func_args = [].slice.call(arguments)
 
       var client = authedClient()
-      client.getMyAvailableBalances()
-        .then(body => {
-          var asset = body.find(x => x.currency.toLowerCase() === opts.asset.toLowerCase())
-          var currency = body.find(x => x.currency.toLowerCase() === opts.currency.toLowerCase())
+      client.balance()
+        .then(result => {
+          var wallet = result[FOXBIT_ID]
 
-          var balance = {
-            asset: n(asset.amount).format('0.00000'),
-            asset_hold: n(asset.amount).subtract(asset.available).format('0.00000'),
-            currency: n(currency.amount).format('0.00'),
-            currency_hold: n(currency.amount).subtract(currency.available).format('0.00')
+          let VALUE_BASE = 100000000
+
+          const balance = {
+            asset: n(wallet.BTC).divide(VALUE_BASE).format('0.00000'),
+            asset_hold: n(wallet.BTC_locked).divide(VALUE_BASE).format('0.00000'),
+            currency: n(wallet.BRL).divide(VALUE_BASE).format('0.00'),
+            currency_hold: n(wallet.BRL_locked).divide(VALUE_BASE).format('0.00')
           }
-
-          debugOut('Balance/Hold:')
-          debugOut(`  ${currency.currency} (${balance.currency}/${balance.currency_hold})`)
-          debugOut(`  ${asset.currency} (${balance.asset}/${balance.asset_hold})`)
-
           cb(null, balance)
         })
         .catch(error => retry('getBalance', func_args, error))
@@ -146,22 +144,24 @@ module.exports = function foxbit (conf) {
       var func_args = [].slice.call(arguments)
 
       var client = publicClient()
-      client.getTicker(joinProduct(opts.product_id))
+      client.ticker()
         .then(body => {
           var r = {
-            bid: String(body.bid),
-            ask: String(body.ask)
+            bid: String(body.buy),
+            ask: String(body.sell)
           }
-
           cb(null, r)
         })
         .catch(error => retry('getQuote', func_args, error))
     },
 
     cancelOrder: function(opts, cb) {
+      var order = orders['~' + opts.order_id]
+
       var func_args = [].slice.call(arguments)
       var params = {
-        order_id: opts.order_id
+        orderID: opts.order_id,
+        ClOrdID: order.ClOrdID
       }
 
       debugOut(`Cancelling order ${opts.order_id}`)
@@ -174,18 +174,10 @@ module.exports = function foxbit (conf) {
 
     buy: function(opts, cb) {
       var params = {
-        symbol: joinProduct(opts.product_id),
-        amount: n(opts.size).format('0.00000'),
+        side: '1',
         price: n(opts.price).format('0.00'),
-        side: 'buy',
-        type: 'exchange limit',
-        options: []
-      }
-
-      if (opts.order_type === 'taker') {
-        params.options.push('immediate-or-cancel')
-      } else if (opts.post_only) {
-        params.options.push('maker-or-cancel')
+        amount: n(opts.size).format('0.00000'),
+        symbol: joinProduct(opts.product_id)
       }
 
       debugOut(`Requesting ${opts.order_type} buy for ${opts.size} assets`)
@@ -194,19 +186,15 @@ module.exports = function foxbit (conf) {
       client.newOrder(params)
         .then(body => {
           var order = {
-            id: body.order_id,
+            id: body.OrderID,
             status: 'open',
             price: Number(opts.price),
             size: Number(opts.size),
             created_at: new Date().getTime(),
             filled_size: '0',
             ordertype: opts.order_type,
-            postonly: !!opts.post_only
-          }
-
-          if (opts.post_only && body.is_cancelled) {
-            order.status = 'rejected',
-            order.reject_reason = 'post only'
+            postonly: !!opts.post_only,
+            ClOrdID: body.ClOrdID
           }
 
           debugOut(`    Purchase ID: ${body.id}`)
@@ -219,18 +207,10 @@ module.exports = function foxbit (conf) {
 
     sell: function(opts, cb) {
       var params = {
-        symbol: joinProduct(opts.product_id),
-        amount: n(opts.size).format('0.00000'),
+        side: '2',
         price: n(opts.price).format('0.00'),
-        side: 'sell',
-        type: 'exchange limit',
-        options: []
-      }
-
-      if (opts.order_type === 'taker') {
-        params.options.push('immediate-or-cancel')
-      } else if (opts.post_only) {
-        params.options.push('maker-or-cancel')
+        amount: n(opts.size).format('0.00000'),
+        symbol: joinProduct(opts.product_id)
       }
 
       debugOut(`Requesting ${opts.order_type} sell for ${opts.size} assets`)
@@ -239,19 +219,15 @@ module.exports = function foxbit (conf) {
       client.newOrder(params)
         .then(body => {
           var order = {
-            id: body.order_id,
+            id: body.OrderID,
             status: 'open',
             price: Number(opts.price),
             size: Number(opts.size),
             created_at: new Date().getTime(),
             filled_size: '0',
             ordertype: opts.order_type,
-            postonly: !!opts.post_only
-          }
-
-          if (opts.post_only && body.is_cancelled) {
-            order.status = 'rejected',
-            order.reject_reason = 'post only'
+            postonly: !!opts.post_only,
+            ClOrdID: body.ClOrdID
           }
 
           debugOut(`    Purchase ID: ${body.id}`)
