@@ -92,7 +92,8 @@ module.exports = function foxbit (conf) {
       if(opts.from > 999999999) {
         if(PROD) {
           // args.since = 2500000 // Mon Feb 05 2018 10:07:22 GMT-0200 (-02)
-          args.since=2620000
+          // args.since=2620000
+          args.since=1600000
         } else {
           args.since = 18000 // Mon Jan 22 2018 15:15:05 GMT-0200 (test)
         }
@@ -175,12 +176,14 @@ module.exports = function foxbit (conf) {
     buy: function(opts, cb) {
       var params = {
         side: '1',
-        price: n(opts.price).format('0.00'),
-        amount: n(opts.size).format('0.00000'),
-        symbol: joinProduct(opts.product_id)
+        price: parseInt((opts.price * 1e8).toFixed(0)),
+        amount: parseInt((opts.size * 1e8).toFixed(0)),
+        symbol: joinProduct(opts.product_id).toUpperCase()
       }
 
       debugOut(`Requesting ${opts.order_type} buy for ${opts.size} assets`)
+
+      console.log('params', params)
 
       var client = authedClient()
       client.newOrder(params)
@@ -208,12 +211,14 @@ module.exports = function foxbit (conf) {
     sell: function(opts, cb) {
       var params = {
         side: '2',
-        price: n(opts.price).format('0.00'),
-        amount: n(opts.size).format('0.00000'),
-        symbol: joinProduct(opts.product_id)
+        price: parseInt((opts.price * 1e8).toFixed(0)),
+        amount: parseInt((opts.size * 1e8).toFixed(0)),
+        symbol: joinProduct(opts.product_id).toUpperCase()
       }
 
       debugOut(`Requesting ${opts.order_type} sell for ${opts.size} assets`)
+
+      console.log('params', params)
 
       var client = authedClient()
       client.newOrder(params)
