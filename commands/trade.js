@@ -746,7 +746,7 @@ module.exports = function (program, conf) {
             })
           }
           else {
-            trade_cursor += parseInt(so.poll_trades)
+            //trade_cursor += parseInt(so.poll_trades)
             saveSession()
           }
         })
